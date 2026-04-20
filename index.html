@@ -1,0 +1,1828 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#0a0a0f">
+  <title>DebatUnie Debat Tool</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { 
+      height: 100%; 
+      width: 100%;
+      overflow: hidden;
+      position: fixed;
+      font-family: 'Instrument Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script type="text/babel">
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+const FORMATS = {
+  hogerhuis: {
+    name: 'Hogerhuis',
+    subtitle: 'Upper House',
+    speakers: [
+      { id: 'v1', name: 'Voorstander 1', role: 'voorstander', time: 4 * 60 },
+      { id: 't1', name: 'Tegenstander 1', role: 'tegenstander', time: 4 * 60 },
+      { id: 'v2', name: 'Voorstander 2', role: 'voorstander', time: 4 * 60 },
+      { id: 't2', name: 'Tegenstander 2', role: 'tegenstander', time: 4 * 60 },
+      { id: 'v3', name: 'Voorstander 3', role: 'voorstander', time: 4 * 60 },
+      { id: 't3', name: 'Tegenstander 3', role: 'tegenstander', time: 4 * 60 },
+      { id: 't4', name: 'Laatste spreker tegenstanders', role: 'tegenstander', time: 2 * 60 },
+      { id: 'v4', name: 'Laatste spreker voorstanders', role: 'voorstander', time: 2 * 60 },
+    ]
+  },
+  middenhuis: {
+    name: 'Middenhuis',
+    subtitle: 'Middle House',
+    speakers: [
+      { id: 'v1', name: 'Voorstander 1', role: 'voorstander', time: 3 * 60 },
+      { id: 't1', name: 'Tegenstander 1', role: 'tegenstander', time: 3 * 60 },
+      { id: 'v2', name: 'Voorstander 2', role: 'voorstander', time: 3 * 60 },
+      { id: 't2', name: 'Tegenstander 2', role: 'tegenstander', time: 3 * 60 },
+      { id: 'open', name: 'Open Fase', role: 'open', time: 8 * 60 },
+      { id: 'bedenk', name: 'Overlegtijd', role: 'bedenktijd', time: 2 * 60 },
+      { id: 't3', name: 'Laatste spreker tegenstanders', role: 'tegenstander', time: 2 * 60 },
+      { id: 'v3', name: 'Laatste spreker voorstanders', role: 'voorstander', time: 2 * 60 },
+    ]
+  }
+};
+
+const FLASH_TIMES = [120, 60, 30, 10];
+const CONFETTI_COLORS = ['#ff6b6b', '#4ecdc4', '#ffe66d', '#95e1d3', '#f38181', '#aa96da', '#fcbad3', '#a8d8ea'];
+
+function DebateTimer() {
+  const [format, setFormat] = useState(null);
+  const [currentSpeakerIndex, setCurrentSpeakerIndex] = useState(0);
+  const [timeRemaining, setTimeRemaining] = useState(0);
+  const [isRunning, setIsRunning] = useState(false);
+  const [isFlashing, setIsFlashing] = useState(false);
+  const [flashedTimes, setFlashedTimes] = useState(new Set());
+  const [isComplete, setIsComplete] = useState(false);
+  const [isExpired, setIsExpired] = useState(false);
+  const [isJuryberaad, setIsJuryberaad] = useState(false);
+  const [showJuryberaadSetup, setShowJuryberaadSetup] = useState(false);
+  const [juryMinutes, setJuryMinutes] = useState(15);
+  const [jurySeconds, setJurySeconds] = useState(0);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showBackgroundPicker, setShowBackgroundPicker] = useState(false);
+  const [customBackground, setCustomBackground] = useState(null);
+  const [backgroundType, setBackgroundType] = useState('default');
+  const [showCalculator, setShowCalculator] = useState(false);
+  const [calcDisplay, setCalcDisplay] = useState('');
+  const [calcPrevious, setCalcPrevious] = useState('');
+  const [calcOperator, setCalcOperator] = useState(null);
+  const [calcWaitingForOperand, setCalcWaitingForOperand] = useState(false);
+  const [completionQuote, setCompletionQuote] = useState(null);
+  const [darkMode, setDarkMode] = useState(true);
+  const [colorTheme, setColorTheme] = useState('default');
+  const [overtimeSeconds, setOvertimeSeconds] = useState(0);
+  const [isOvertime, setIsOvertime] = useState(false);
+  const [overtimeFlashed, setOvertimeFlashed] = useState(false);
+  const intervalRef = useRef(null);
+  const overtimeRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  const COLOR_THEMES = {
+    default: { primary: '#6366f1', secondary: '#8b5cf6', name: 'Paars' },
+    blue: { primary: '#3b82f6', secondary: '#0ea5e9', name: 'Blauw' },
+    orange: { primary: '#f97316', secondary: '#fb923c', name: 'Oranje' },
+    teal: { primary: '#14b8a6', secondary: '#2dd4bf', name: 'Teal' },
+    pink: { primary: '#ec4899', secondary: '#f472b6', name: 'Roze' }
+  };
+
+  const themeColors = darkMode ? {
+    bg: '#0a0a0f',
+    bgSecondary: '#1a1a2e',
+    text: '#ffffff',
+    textSecondary: '#64748b',
+    border: 'rgba(255,255,255,0.1)'
+  } : {
+    bg: '#f8fafc',
+    bgSecondary: '#e2e8f0',
+    text: '#1e293b',
+    textSecondary: '#64748b',
+    border: 'rgba(0,0,0,0.1)'
+  };
+
+  const isImageBg = backgroundType === 'image' && customBackground;
+  const buttonBg = isImageBg ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.1)';
+  const buttonBgHover = isImageBg ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.15)';
+  const buttonBorder = isImageBg ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.1)';
+
+  const QUOTES = [
+    { text: "Ik ben voor de stelling want NLPlan is tegen racisme.", author: "Kok Chan" },
+    { text: "Het kan wél", author: "Robin Palma" },
+    { text: "Je kan beter gewoon een goed debat winnen", author: null },
+    { text: "Ik dacht ik pak die klap wel, plus twee zetels.", author: "Robin P." },
+    { text: "Nu nog even checken of het mijn nicht is.", author: "M.A. Güler" },
+    { text: "Beter een goed debat verliezen dan een slecht debat winnen", author: null },
+    { text: "Goede journalistiek is heel belangrijk, anders gaan journalistiekbedrijven failliet.", author: null },
+    { text: "Meneer doe de licht dicht.", author: null },
+    { text: "Nee. Nee. No way. Nee. Hou op. Je loopt me te focken. Neeeee.", author: "Lucas" },
+    { text: "67", author: "Niels Konings" },
+    { text: "Ik ben PRO, dus kan ik alleen maar voor deze en alle volgende stellingen zijn.", author: "Erwin Virginia" },
+    { text: "Daklozen? Die hoeven geen lagere boete, want die hebben toch geen auto. Hoe kunnen ze dan een boete krijgen?", author: "Slimme Deelnemer" },
+    { text: "Eigenlijk is de SGP progressief", author: null },
+    { text: "Kan PRO niet gewoon iets minder PROblematische dingen voorstellen", author: null },
+    { text: "PRO? Je bedoelt zeker de Greenpeace PROpagandamachine", author: null }
+  ];
+
+  const currentSpeaker = format ? FORMATS[format].speakers[currentSpeakerIndex] : null;
+
+  // Pre-generate confetti data to avoid re-randomizing on every render
+  const confettiData = useMemo(() => {
+    return [...Array(100)].map((_, i) => ({
+      id: i,
+      left: Math.random() * 100,
+      width: Math.random() * 10 + 5,
+      height: Math.random() * 10 + 5,
+      color: CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
+      isCircle: Math.random() > 0.5,
+      duration: Math.random() * 4 + 4,
+      delay: Math.random() * 9.5 + 0.5,
+    }));
+  }, [isComplete]);
+
+  const triggerVibrate = useCallback((pattern = [200]) => {
+    if (navigator.vibrate) {
+      navigator.vibrate(pattern);
+    }
+  }, []);
+
+  const triggerFlash = useCallback((longVibrate = false) => {
+    if (longVibrate) {
+      triggerVibrate([500, 100, 500, 100, 500]);
+    } else {
+      triggerVibrate([200, 100, 200, 100, 200]);
+    }
+    
+    let flashCount = 0;
+    const doFlash = () => {
+      setIsFlashing(true);
+      setTimeout(() => {
+        setIsFlashing(false);
+        flashCount++;
+        if (flashCount < 3) {
+          setTimeout(doFlash, 150);
+        }
+      }, 250);
+    };
+    doFlash();
+  }, [triggerVibrate]);
+
+  useEffect(() => {
+    if (isRunning && timeRemaining > 0 && !isOvertime) {
+      intervalRef.current = setInterval(() => {
+        setTimeRemaining(prev => {
+          const newTime = prev - 1;
+          
+          if (!isJuryberaad && FLASH_TIMES.includes(newTime) && !flashedTimes.has(newTime)) {
+            triggerFlash(false);
+            setFlashedTimes(f => new Set([...f, newTime]));
+          }
+          
+          if (newTime <= 0) {
+            setIsExpired(true);
+            setIsOvertime(true);
+            setOvertimeSeconds(0);
+            setOvertimeFlashed(false);
+            return 0;
+          }
+          
+          return newTime;
+        });
+      }, 1000);
+    } else {
+      clearInterval(intervalRef.current);
+    }
+    
+    return () => clearInterval(intervalRef.current);
+  }, [isRunning, flashedTimes, triggerFlash, isJuryberaad, isOvertime]);
+
+  useEffect(() => {
+    if (isOvertime && isRunning) {
+      overtimeRef.current = setInterval(() => {
+        setOvertimeSeconds(prev => {
+          const newTime = prev + 1;
+          
+          if (newTime >= 10 && !overtimeFlashed) {
+            triggerFlash(true);
+            setOvertimeFlashed(true);
+          }
+          
+          return newTime;
+        });
+      }, 1000);
+    } else {
+      clearInterval(overtimeRef.current);
+    }
+    
+    return () => clearInterval(overtimeRef.current);
+  }, [isOvertime, isRunning, overtimeFlashed, triggerFlash]);
+
+  const selectFormat = (f) => {
+    setFormat(f);
+    setCurrentSpeakerIndex(0);
+    setTimeRemaining(FORMATS[f].speakers[0].time);
+    setFlashedTimes(new Set());
+    setIsComplete(false);
+    setIsExpired(false);
+    setIsOvertime(false);
+    setOvertimeSeconds(0);
+    setOvertimeFlashed(false);
+  };
+
+  const toggleTimer = () => {
+    setIsRunning(!isRunning);
+  };
+
+  const resetTimer = () => {
+    setIsRunning(false);
+    setTimeRemaining(currentSpeaker.time);
+    setFlashedTimes(new Set());
+    setIsExpired(false);
+    setIsOvertime(false);
+    setOvertimeSeconds(0);
+    setOvertimeFlashed(false);
+  };
+
+  const nextSpeaker = () => {
+    const speakers = FORMATS[format].speakers;
+    if (currentSpeakerIndex < speakers.length - 1) {
+      const nextIndex = currentSpeakerIndex + 1;
+      setCurrentSpeakerIndex(nextIndex);
+      setTimeRemaining(speakers[nextIndex].time);
+      setIsRunning(false);
+      setFlashedTimes(new Set());
+      setIsExpired(false);
+      setIsOvertime(false);
+      setOvertimeSeconds(0);
+      setOvertimeFlashed(false);
+    } else {
+      setCompletionQuote(QUOTES[Math.floor(Math.random() * QUOTES.length)]);
+      setIsComplete(true);
+      setIsRunning(false);
+    }
+  };
+
+  const prevSpeaker = () => {
+    if (currentSpeakerIndex > 0) {
+      const prevIndex = currentSpeakerIndex - 1;
+      setCurrentSpeakerIndex(prevIndex);
+      setTimeRemaining(FORMATS[format].speakers[prevIndex].time);
+      setIsRunning(false);
+      setFlashedTimes(new Set());
+      setIsExpired(false);
+      setIsOvertime(false);
+      setOvertimeSeconds(0);
+      setOvertimeFlashed(false);
+    }
+  };
+
+  const goBack = () => {
+    setFormat(null);
+    setCurrentSpeakerIndex(0);
+    setIsRunning(false);
+    setIsComplete(false);
+    setIsExpired(false);
+    setIsJuryberaad(false);
+    setShowJuryberaadSetup(false);
+    setShowCalculator(false);
+    setShowSettings(false);
+    setCalcDisplay('');
+    setCalcPrevious('');
+    setCalcOperator(null);
+    setCalcWaitingForOperand(false);
+    setIsOvertime(false);
+    setOvertimeSeconds(0);
+    setOvertimeFlashed(false);
+  };
+
+  const startJuryberaad = () => {
+    const totalSeconds = (juryMinutes * 60) + jurySeconds;
+    if (totalSeconds > 0) {
+      setTimeRemaining(totalSeconds);
+      setIsJuryberaad(true);
+      setShowJuryberaadSetup(false);
+      setFlashedTimes(new Set());
+      setIsExpired(false);
+      setIsRunning(true);
+    }
+  };
+
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const getProgress = () => {
+    if (!currentSpeaker) return 0;
+    return ((currentSpeaker.time - timeRemaining) / currentSpeaker.time) * 100;
+  };
+
+  const getRoleColor = (role) => {
+    switch (role) {
+      case 'voorstander': return { bg: '#0d3320', accent: '#22c55e', glow: 'rgba(34, 197, 94, 0.3)' };
+      case 'tegenstander': return { bg: '#0c2d4d', accent: '#3b82f6', glow: 'rgba(59, 130, 246, 0.3)' };
+      case 'open': return { bg: '#1e1b4b', accent: '#a78bfa', glow: 'rgba(167, 139, 250, 0.3)' };
+      case 'bedenktijd': return { bg: '#422006', accent: '#f59e0b', glow: 'rgba(245, 158, 11, 0.3)' };
+      default: return { bg: '#1a1a2e', accent: '#60a5fa', glow: 'rgba(96, 165, 250, 0.3)' };
+    }
+  };
+
+  const handleCalcButton = (btn) => {
+    if (btn >= '0' && btn <= '9') {
+      if (calcWaitingForOperand) {
+        if (btn.length <= 3) {
+          setCalcDisplay(btn);
+        }
+        setCalcWaitingForOperand(false);
+      } else {
+        const newDisplay = calcDisplay === '0' ? btn : calcDisplay + btn;
+        if (Math.abs(parseFloat(newDisplay)) <= 999) {
+          setCalcDisplay(newDisplay);
+        }
+      }
+    } else if (btn === 'C') {
+      setCalcDisplay('');
+      setCalcPrevious('');
+      setCalcOperator(null);
+      setCalcWaitingForOperand(false);
+    } else if (btn === '⌫') {
+      setCalcDisplay(calcDisplay.slice(0, -1));
+    } else if (['-', '+'].includes(btn)) {
+      if (calcDisplay) {
+        if (calcOperator && !calcWaitingForOperand) {
+          const result = calculate(parseFloat(calcPrevious), parseFloat(calcDisplay), calcOperator);
+          const limitedResult = Math.max(-999, Math.min(999, result));
+          setCalcDisplay(String(limitedResult));
+          setCalcPrevious(String(limitedResult));
+        } else {
+          setCalcPrevious(calcDisplay);
+        }
+        setCalcOperator(btn);
+        setCalcWaitingForOperand(true);
+      }
+    } else if (btn === '=') {
+      if (calcOperator && calcPrevious && calcDisplay) {
+        const result = calculate(parseFloat(calcPrevious), parseFloat(calcDisplay), calcOperator);
+        const limitedResult = Math.max(-999, Math.min(999, result));
+        setCalcDisplay(String(limitedResult));
+        setCalcPrevious('');
+        setCalcOperator(null);
+        setCalcWaitingForOperand(true);
+      }
+    }
+  };
+
+  const calculate = (a, b, op) => {
+    switch (op) {
+      case '+': return a + b;
+      case '-': return a - b;
+      default: return b;
+    }
+  };
+
+  const handleImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setCustomBackground(reader.result);
+        setBackgroundType('image');
+        setShowBackgroundPicker(false);
+        setShowSettings(false);
+      };
+      reader.readAsDataURL(file);
+    }
+    // Reset input value so same file can be selected again
+    e.target.value = '';
+  };
+
+  const getBackgroundStyle = (defaultGradient) => {
+    if (isFlashing) {
+      return 'linear-gradient(145deg, #fef08a 0%, #fde047 50%, #facc15 100%)';
+    }
+    if (isExpired) {
+      return 'linear-gradient(145deg, #7f1d1d 0%, #991b1b 50%, #7f1d1d 100%)';
+    }
+    if (backgroundType === 'image' && customBackground) {
+      return `url(${customBackground})`;
+    }
+    if (backgroundType === 'color' && customBackground) {
+      return customBackground;
+    }
+    return defaultGradient;
+  };
+
+  const SettingsGear = () => (
+    <button
+      onClick={() => setShowSettings(!showSettings)}
+      style={{
+        position: 'absolute',
+        top: '1.5rem',
+        right: '1.5rem',
+        background: buttonBg,
+        border: `1px solid ${buttonBorder}`,
+        borderRadius: '0.75rem',
+        padding: '0.75rem',
+        color: '#ffffff',
+        cursor: 'pointer',
+        transition: 'all 0.2s ease',
+        zIndex: 100,
+      }}
+    >
+      ⚙️
+    </button>
+  );
+
+  const SettingsMenu = () => (
+    showSettings && (
+      <div style={{
+        position: 'absolute',
+        top: '4.5rem',
+        right: '1.5rem',
+        background: isImageBg ? 'rgba(0, 0, 0, 0.85)' : 'rgba(30, 30, 50, 0.95)',
+        border: `1px solid ${buttonBorder}`,
+        borderRadius: '1rem',
+        padding: '0.5rem',
+        zIndex: 100,
+        minWidth: '220px',
+      }}>
+        <button
+          onClick={() => {
+            setShowBackgroundPicker(true);
+            setShowSettings(false);
+          }}
+          style={{
+            width: '100%',
+            background: 'transparent',
+            border: 'none',
+            borderRadius: '0.5rem',
+            padding: '1rem',
+            color: '#ffffff',
+            fontSize: '1rem',
+            textAlign: 'left',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.background = buttonBgHover}
+          onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+        >
+          🎨 Verander achtergrond
+        </button>
+        
+        <button
+          onClick={() => setDarkMode(!darkMode)}
+          style={{
+            width: '100%',
+            background: 'transparent',
+            border: 'none',
+            borderRadius: '0.5rem',
+            padding: '1rem',
+            color: '#ffffff',
+            fontSize: '1rem',
+            textAlign: 'left',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.background = buttonBgHover}
+          onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+        >
+          {darkMode ? '☀️ Lichte modus' : '🌙 Donkere modus'}
+        </button>
+        
+        <div style={{
+          padding: '0.5rem 1rem',
+          color: '#9ca3af',
+          fontSize: '0.85rem',
+          borderTop: `1px solid ${buttonBorder}`,
+          marginTop: '0.5rem',
+        }}>
+          Kleurthema
+        </div>
+        
+        <div style={{
+          display: 'flex',
+          gap: '0.5rem',
+          padding: '0.5rem 1rem',
+          flexWrap: 'wrap',
+        }}>
+          {Object.entries(COLOR_THEMES).map(([key, theme]) => (
+            <button
+              key={key}
+              onClick={() => setColorTheme(key)}
+              style={{
+                width: '2rem',
+                height: '2rem',
+                borderRadius: '50%',
+                background: `linear-gradient(135deg, ${theme.primary}, ${theme.secondary})`,
+                border: colorTheme === key ? '3px solid white' : '2px solid transparent',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+              title={theme.name}
+            />
+          ))}
+        </div>
+      </div>
+    )
+  );
+
+  const BackgroundPicker = () => (
+    showBackgroundPicker && (
+      <div style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: 'rgba(0,0,0,0.9)',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '2rem',
+        zIndex: 200,
+      }}>
+        <div style={{
+          background: 'linear-gradient(145deg, #1a1a2e 0%, #0f0f1a 100%)',
+          borderRadius: '1.5rem',
+          padding: '2rem',
+          maxWidth: '400px',
+          width: '100%',
+        }}>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '1.5rem',
+          }}>
+            <h2 style={{ color: '#ffffff', fontSize: '1.5rem', fontWeight: '700' }}>
+              Kies achtergrond
+            </h2>
+            <button
+              onClick={() => setShowBackgroundPicker(false)}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: '#ffffff',
+                fontSize: '1.5rem',
+                cursor: 'pointer',
+              }}
+            >
+              ✕
+            </button>
+          </div>
+          
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              width: '100%',
+              background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
+              border: 'none',
+              borderRadius: '1rem',
+              padding: '1rem',
+              color: '#ffffff',
+              fontSize: '1rem',
+              fontWeight: '600',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              marginBottom: '1rem',
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
+            onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+          >
+            📷 Kies uit galerij
+          </button>
+          
+          <button
+            onClick={() => {
+              setCustomBackground(null);
+              setBackgroundType('default');
+              setShowBackgroundPicker(false);
+              setShowSettings(false);
+            }}
+            style={{
+              width: '100%',
+              background: buttonBg,
+              border: `1px solid ${buttonBorder}`,
+              borderRadius: '1rem',
+              padding: '1rem',
+              color: '#ffffff',
+              fontSize: '1rem',
+              fontWeight: '600',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            ↺ Standaard achtergrond
+          </button>
+          
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleImageUpload}
+            style={{ display: 'none' }}
+          />
+        </div>
+      </div>
+    )
+  );
+
+  // Format Selection Screen
+  if (!format && !showJuryberaadSetup && !isJuryberaad && !showCalculator) {
+    return (
+      <div style={{
+        height: '100vh',
+        maxHeight: '100vh',
+        overflow: 'hidden',
+        background: getBackgroundStyle('linear-gradient(145deg, #0a0a0f 0%, #1a1a2e 50%, #0f0f1a 100%)'),
+        backgroundSize: backgroundType === 'image' ? 'cover' : 'auto',
+        backgroundPosition: 'center center',
+        backgroundRepeat: 'no-repeat',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 'clamp(1rem, 3vh, 2rem)',
+        fontFamily: "'Instrument Sans', -apple-system, BlinkMacSystemFont, sans-serif",
+        position: 'relative',
+      }}>
+        <style>{`
+          @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+          }
+          
+          @keyframes pulse {
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 1; }
+          }
+          
+          @keyframes slideUp {
+            from { opacity: 0; transform: translateY(30px); }
+            to { opacity: 1; transform: translateY(0); }
+          }
+        `}</style>
+        
+        <SettingsGear />
+        <SettingsMenu />
+        <BackgroundPicker />
+        
+        <div style={{
+          textAlign: 'center',
+          marginBottom: 'clamp(0.5rem, 2vh, 1rem)',
+          animation: 'slideUp 0.6s ease-out',
+        }}>
+          <div style={{
+            fontSize: 'clamp(0.5rem, 1.5vw, 0.7rem)',
+            fontWeight: '600',
+            letterSpacing: '0.15em',
+            textTransform: 'uppercase',
+            color: '#6366f1',
+            marginBottom: '0.25rem',
+          }}>
+            DebatUnie Debat Tool
+          </div>
+          <h1 style={{
+            fontSize: 'clamp(1.25rem, 4vw, 1.75rem)',
+            fontWeight: '700',
+            color: '#ffffff',
+            lineHeight: '1.1',
+          }}>
+            Kies de tool
+          </h1>
+        </div>
+
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(2, 1fr)',
+          gap: 'clamp(0.75rem, 3vw, 1.5rem)',
+          width: '100%',
+          maxWidth: '500px',
+          flex: 1,
+          alignContent: 'center',
+          animation: 'slideUp 0.6s ease-out 0.1s both',
+        }}>
+          {Object.entries(FORMATS).map(([key, data]) => (
+            <button
+              key={key}
+              onClick={() => selectFormat(key)}
+              style={{
+                background: isImageBg 
+                  ? 'linear-gradient(145deg, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.4) 100%)'
+                  : 'linear-gradient(145deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%)',
+                border: `1px solid ${buttonBorder}`,
+                borderRadius: 'clamp(1rem, 3vw, 1.5rem)',
+                padding: 'clamp(1.5rem, 5vw, 3rem)',
+                cursor: 'pointer',
+                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                position: 'relative',
+                overflow: 'hidden',
+                aspectRatio: '1',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-4px) scale(1.02)';
+                e.currentTarget.style.borderColor = key === 'hogerhuis' ? '#22c55e' : '#a78bfa';
+                e.currentTarget.style.boxShadow = key === 'hogerhuis' 
+                  ? '0 20px 40px rgba(34, 197, 94, 0.2)' 
+                  : '0 20px 40px rgba(167, 139, 250, 0.2)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0) scale(1)';
+                e.currentTarget.style.borderColor = buttonBorder;
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              <div style={{
+                position: 'absolute',
+                top: '-50%',
+                right: '-50%',
+                width: '100%',
+                height: '100%',
+                background: key === 'hogerhuis'
+                  ? 'radial-gradient(circle, rgba(34, 197, 94, 0.1) 0%, transparent 70%)'
+                  : 'radial-gradient(circle, rgba(167, 139, 250, 0.1) 0%, transparent 70%)',
+                pointerEvents: 'none',
+              }} />
+              
+              <div style={{
+                fontSize: 'clamp(2.5rem, 8vw, 4rem)',
+                marginBottom: 'clamp(0.5rem, 2vw, 1rem)',
+              }}>
+                {key === 'hogerhuis' ? '🏛️' : '🏠'}
+              </div>
+              
+              <h2 style={{
+                fontSize: 'clamp(1.1rem, 3.5vw, 1.5rem)',
+                fontWeight: '700',
+                color: '#ffffff',
+              }}>
+                {data.name}
+              </h2>
+            </button>
+          ))}
+          
+          <button
+            onClick={() => setShowJuryberaadSetup(true)}
+            style={{
+              background: isImageBg 
+                ? 'linear-gradient(145deg, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.4) 100%)'
+                : 'linear-gradient(145deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%)',
+              border: `1px solid ${buttonBorder}`,
+              borderRadius: 'clamp(1rem, 3vw, 1.5rem)',
+              padding: 'clamp(1.5rem, 5vw, 3rem)',
+              cursor: 'pointer',
+              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+              position: 'relative',
+              overflow: 'hidden',
+              aspectRatio: '1',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'translateY(-4px) scale(1.02)';
+              e.currentTarget.style.borderColor = '#f59e0b';
+              e.currentTarget.style.boxShadow = '0 20px 40px rgba(245, 158, 11, 0.2)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'translateY(0) scale(1)';
+              e.currentTarget.style.borderColor = buttonBorder;
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+          >
+            <div style={{
+              position: 'absolute',
+              top: '-50%',
+              right: '-50%',
+              width: '100%',
+              height: '100%',
+              background: 'radial-gradient(circle, rgba(245, 158, 11, 0.1) 0%, transparent 70%)',
+              pointerEvents: 'none',
+            }} />
+            
+            <div style={{
+              fontSize: 'clamp(2.5rem, 8vw, 4rem)',
+              marginBottom: 'clamp(0.5rem, 2vw, 1rem)',
+            }}>
+              ⚖️
+            </div>
+            
+            <h2 style={{
+              fontSize: 'clamp(1.1rem, 3.5vw, 1.5rem)',
+              fontWeight: '700',
+              color: '#ffffff',
+            }}>
+              Juryberaad
+            </h2>
+          </button>
+          
+          <button
+            onClick={() => setShowCalculator(true)}
+            style={{
+              background: isImageBg 
+                ? 'linear-gradient(145deg, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.4) 100%)'
+                : 'linear-gradient(145deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%)',
+              border: `1px solid ${buttonBorder}`,
+              borderRadius: 'clamp(1rem, 3vw, 1.5rem)',
+              padding: 'clamp(1.5rem, 5vw, 3rem)',
+              cursor: 'pointer',
+              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+              position: 'relative',
+              overflow: 'hidden',
+              aspectRatio: '1',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'translateY(-4px) scale(1.02)';
+              e.currentTarget.style.borderColor = '#10b981';
+              e.currentTarget.style.boxShadow = '0 20px 40px rgba(16, 185, 129, 0.2)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'translateY(0) scale(1)';
+              e.currentTarget.style.borderColor = buttonBorder;
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+          >
+            <div style={{
+              position: 'absolute',
+              top: '-50%',
+              right: '-50%',
+              width: '100%',
+              height: '100%',
+              background: 'radial-gradient(circle, rgba(16, 185, 129, 0.1) 0%, transparent 70%)',
+              pointerEvents: 'none',
+            }} />
+            
+            <div style={{
+              fontSize: 'clamp(2.5rem, 8vw, 4rem)',
+              marginBottom: 'clamp(0.5rem, 2vw, 1rem)',
+            }}>
+              🧮
+            </div>
+            
+            <h2 style={{
+              fontSize: 'clamp(1.1rem, 3.5vw, 1.5rem)',
+              fontWeight: '700',
+              color: '#ffffff',
+            }}>
+              Rekenmachine
+            </h2>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Calculator Screen
+  if (showCalculator) {
+    return (
+      <div style={{
+        height: '100vh',
+        maxHeight: '100vh',
+        overflow: 'hidden',
+        background: getBackgroundStyle('linear-gradient(145deg, #0a0a0f 0%, #064e3b 50%, #0f0f1a 100%)'),
+        backgroundSize: backgroundType === 'image' ? 'cover' : 'auto',
+        backgroundPosition: 'center center',
+        backgroundRepeat: 'no-repeat',
+        display: 'flex',
+        flexDirection: 'column',
+        padding: '0.75rem',
+        fontFamily: "'Instrument Sans', -apple-system, BlinkMacSystemFont, sans-serif",
+        position: 'relative',
+      }}>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'flex-start',
+          alignItems: 'center',
+          marginBottom: '0.5rem',
+          flexShrink: 0,
+        }}>
+          <button
+            onClick={() => setShowCalculator(false)}
+            style={{
+              background: buttonBg,
+              border: `1px solid ${buttonBorder}`,
+              borderRadius: '0.5rem',
+              padding: '0.5rem 1rem',
+              color: '#ffffff',
+              fontSize: '0.75rem',
+              fontWeight: '500',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            ← Terug
+          </button>
+        </div>
+
+        <div style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          maxWidth: '350px',
+          margin: '0 auto',
+          width: '100%',
+          justifyContent: 'space-evenly',
+        }}>
+          <div style={{
+            width: '100%',
+            background: 'rgba(0,0,0,0.3)',
+            borderRadius: '0.75rem',
+            padding: 'clamp(0.75rem, 2vh, 1.5rem)',
+            textAlign: 'right',
+            flexShrink: 0,
+          }}>
+            <div style={{
+              fontSize: 'clamp(0.75rem, 2vh, 1rem)',
+              color: '#64748b',
+              marginBottom: '0.25rem',
+              minHeight: '1rem',
+            }}>
+              {calcPrevious}
+            </div>
+            <div style={{
+              fontSize: 'clamp(1.5rem, 6vh, 2.5rem)',
+              fontFamily: "'JetBrains Mono', monospace",
+              fontWeight: '700',
+              color: '#ffffff',
+              wordBreak: 'break-all',
+            }}>
+              {calcDisplay || '0'}
+            </div>
+          </div>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: 'clamp(0.4rem, 1.5vw, 0.75rem)',
+            width: '100%',
+          }}>
+            {['7', '8', '9', '4', '5', '6', '1', '2', '3', 'C', '0', '⌫'].map((btn) => (
+              <button
+                key={btn}
+                onClick={() => handleCalcButton(btn)}
+                style={{
+                  padding: 'clamp(0.75rem, 3vh, 1.25rem)',
+                  fontSize: 'clamp(1.25rem, 4vh, 1.75rem)',
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontWeight: '600',
+                  border: `1px solid ${buttonBorder}`,
+                  borderRadius: '0.75rem',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                  background: ['C', '⌫'].includes(btn)
+                    ? (isImageBg ? 'rgba(0,0,0,0.65)' : 'rgba(255,255,255,0.15)')
+                    : buttonBg,
+                  color: '#ffffff',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'scale(1.05)';
+                  e.currentTarget.style.filter = 'brightness(1.2)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'scale(1)';
+                  e.currentTarget.style.filter = 'brightness(1)';
+                }}
+              >
+                {btn}
+              </button>
+            ))}
+          </div>
+          
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: 'clamp(0.4rem, 1.5vw, 0.75rem)',
+            width: '100%',
+          }}>
+            {['+', '-', '='].map((btn) => (
+              <button
+                key={btn}
+                onClick={() => handleCalcButton(btn)}
+                style={{
+                  padding: 'clamp(0.75rem, 3vh, 1.25rem)',
+                  fontSize: 'clamp(1.25rem, 4vh, 1.75rem)',
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontWeight: '600',
+                  border: 'none',
+                  borderRadius: '0.75rem',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                  color: '#ffffff',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'scale(1.05)';
+                  e.currentTarget.style.filter = 'brightness(1.2)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'scale(1)';
+                  e.currentTarget.style.filter = 'brightness(1)';
+                }}
+              >
+                {btn}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Juryberaad Setup Screen
+  if (showJuryberaadSetup) {
+    return (
+      <div style={{
+        height: '100vh',
+        maxHeight: '100vh',
+        overflow: 'hidden',
+        background: 'linear-gradient(145deg, #0a0a0f 0%, #422006 50%, #0f0f1a 100%)',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '1rem',
+        fontFamily: "'Instrument Sans', -apple-system, BlinkMacSystemFont, sans-serif",
+      }}>
+        <style>{`
+          @keyframes slideUp {
+            from { opacity: 0; transform: translateY(30px); }
+            to { opacity: 1; transform: translateY(0); }
+          }
+        `}</style>
+        
+        <div style={{
+          position: 'absolute',
+          top: '0.75rem',
+          left: '0.75rem',
+        }}>
+          <button
+            onClick={() => setShowJuryberaadSetup(false)}
+            style={{
+              background: buttonBg,
+              border: `1px solid ${buttonBorder}`,
+              borderRadius: '0.5rem',
+              padding: '0.5rem 1rem',
+              color: '#ffffff',
+              fontSize: '0.75rem',
+              fontWeight: '500',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            ← Terug
+          </button>
+        </div>
+        
+        <div style={{
+          textAlign: 'center',
+          marginBottom: 'clamp(1rem, 4vh, 2rem)',
+          animation: 'slideUp 0.6s ease-out',
+        }}>
+          <div style={{ fontSize: 'clamp(2rem, 8vw, 3rem)', marginBottom: 'clamp(0.25rem, 1vh, 0.5rem)' }}>⚖️</div>
+          <h1 style={{
+            fontSize: 'clamp(1.25rem, 5vw, 2rem)',
+            fontWeight: '700',
+            color: '#ffffff',
+            marginBottom: '0.25rem',
+          }}>
+            Timer Juryberaad
+          </h1>
+          <p style={{
+            fontSize: 'clamp(0.75rem, 2.5vw, 1rem)',
+            color: '#64748b',
+          }}>
+            Stel de tijd in
+          </p>
+        </div>
+        
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          gap: 'clamp(0.75rem, 3vw, 1.5rem)',
+          marginBottom: 'clamp(1rem, 4vh, 2rem)',
+          animation: 'slideUp 0.6s ease-out 0.1s both',
+        }}>
+          <div style={{ textAlign: 'center' }}>
+            <label style={{ color: '#64748b', fontSize: 'clamp(0.7rem, 2.5vw, 0.9rem)', display: 'block', marginBottom: '0.5rem' }}>
+              Minuten
+            </label>
+            <input
+              type="number"
+              min="0"
+              max="60"
+              value={juryMinutes}
+              onChange={(e) => setJuryMinutes(Math.max(0, Math.min(60, parseInt(e.target.value) || 0)))}
+              style={{
+                width: 'clamp(4rem, 15vw, 5rem)',
+                padding: 'clamp(0.5rem, 2vh, 0.75rem)',
+                fontSize: 'clamp(1.25rem, 5vw, 1.75rem)',
+                fontFamily: "'JetBrains Mono', monospace",
+                fontWeight: '600',
+                textAlign: 'center',
+                background: isImageBg ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.1)',
+                border: '2px solid rgba(245, 158, 11, 0.3)',
+                borderRadius: '0.75rem',
+                color: '#ffffff',
+                outline: 'none',
+              }}
+            />
+          </div>
+          
+          <span style={{ fontSize: 'clamp(1.5rem, 6vw, 2.5rem)', color: '#ffffff', fontWeight: '700', paddingTop: '1.5rem' }}>:</span>
+          
+          <div style={{ textAlign: 'center' }}>
+            <label style={{ color: '#64748b', fontSize: 'clamp(0.7rem, 2.5vw, 0.9rem)', display: 'block', marginBottom: '0.5rem' }}>
+              Seconden
+            </label>
+            <input
+              type="number"
+              min="0"
+              max="59"
+              value={jurySeconds}
+              onChange={(e) => setJurySeconds(Math.max(0, Math.min(59, parseInt(e.target.value) || 0)))}
+              style={{
+                width: 'clamp(4rem, 15vw, 5rem)',
+                padding: 'clamp(0.5rem, 2vh, 0.75rem)',
+                fontSize: 'clamp(1.25rem, 5vw, 1.75rem)',
+                fontFamily: "'JetBrains Mono', monospace",
+                fontWeight: '600',
+                textAlign: 'center',
+                background: isImageBg ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.1)',
+                border: '2px solid rgba(245, 158, 11, 0.3)',
+                borderRadius: '0.75rem',
+                color: '#ffffff',
+                outline: 'none',
+              }}
+            />
+          </div>
+        </div>
+        
+        <button
+          onClick={startJuryberaad}
+          style={{
+            background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+            border: 'none',
+            borderRadius: '0.75rem',
+            padding: 'clamp(0.75rem, 2vh, 1rem) clamp(2rem, 8vw, 3rem)',
+            fontSize: 'clamp(0.9rem, 3vw, 1.1rem)',
+            fontWeight: '700',
+            color: '#ffffff',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+            animation: 'slideUp 0.6s ease-out 0.2s both',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'scale(1.05)';
+            e.currentTarget.style.boxShadow = '0 15px 40px rgba(245, 158, 11, 0.4)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'scale(1)';
+            e.currentTarget.style.boxShadow = 'none';
+          }}
+        >
+          Start Timer
+        </button>
+      </div>
+    );
+  }
+
+  // Juryberaad Timer Screen
+  if (isJuryberaad) {
+    const juryColors = { bg: '#422006', accent: '#f59e0b', glow: 'rgba(245, 158, 11, 0.3)' };
+    
+    const juryBackground = () => {
+      if (isExpired) return 'linear-gradient(145deg, #7f1d1d 0%, #991b1b 50%, #7f1d1d 100%)';
+      if (backgroundType === 'image' && customBackground) return `url(${customBackground})`;
+      if (backgroundType === 'color' && customBackground) return customBackground;
+      return `linear-gradient(145deg, #0a0a0f 0%, ${juryColors.bg} 50%, #0a0a0f 100%)`;
+    };
+    
+    return (
+      <div style={{
+        height: '100vh',
+        maxHeight: '100vh',
+        overflow: 'hidden',
+        background: juryBackground(),
+        backgroundSize: backgroundType === 'image' ? 'cover' : 'auto',
+        backgroundPosition: 'center center',
+        backgroundRepeat: 'no-repeat',
+        display: 'flex',
+        flexDirection: 'column',
+        padding: '1rem',
+        fontFamily: "'Instrument Sans', -apple-system, BlinkMacSystemFont, sans-serif",
+        transition: 'background 0.15s ease',
+        position: 'relative',
+      }}>
+        <style>{`
+          @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.02); }
+          }
+        `}</style>
+
+        <div style={{
+          display: 'flex',
+          justifyContent: 'flex-start',
+          alignItems: 'center',
+          marginBottom: 'clamp(0.5rem, 2vh, 1rem)',
+          flexShrink: 0,
+        }}>
+          <button
+            onClick={goBack}
+            style={{
+              background: buttonBg,
+              border: `1px solid ${buttonBorder}`,
+              borderRadius: '0.5rem',
+              padding: '0.5rem 1rem',
+              color: '#ffffff',
+              fontSize: '0.75rem',
+              fontWeight: '500',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            ← Terug
+          </button>
+        </div>
+
+        <div style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: 0,
+        }}>
+          <div style={{ textAlign: 'center', marginBottom: 'clamp(0.5rem, 2vh, 1rem)' }}>
+            <h1 style={{
+              fontSize: 'clamp(1.5rem, 6vw, 2.5rem)',
+              fontWeight: '700',
+              color: '#ffffff',
+            }}>
+              ⚖️ Juryberaad
+            </h1>
+          </div>
+
+          <div style={{
+            position: 'relative',
+            marginBottom: 'clamp(1rem, 3vh, 2rem)',
+          }}>
+            <div style={{
+              fontSize: 'clamp(4rem, 20vw, 9rem)',
+              fontFamily: "'JetBrains Mono', monospace",
+              fontWeight: '700',
+              color: isOvertime ? '#ef4444' : (isExpired ? '#fca5a5' : '#ffffff'),
+              letterSpacing: '-0.02em',
+              textShadow: isOvertime ? '0 0 60px rgba(239, 68, 68, 0.5)' : `0 0 60px ${juryColors.glow}`,
+              animation: (isRunning && timeRemaining <= 10) || isOvertime ? 'pulse 0.5s ease-in-out infinite' : 'none',
+              lineHeight: 1,
+            }}>
+              {isOvertime ? `+${overtimeSeconds}` : formatTime(timeRemaining)}
+            </div>
+            
+            {isOvertime && (
+              <div style={{
+                textAlign: 'center',
+                marginTop: '0.5rem',
+                fontSize: 'clamp(0.8rem, 2.5vw, 1rem)',
+                color: '#ef4444',
+                fontWeight: '600',
+                textTransform: 'uppercase',
+                letterSpacing: '0.1em',
+              }}>
+                Overtime
+              </div>
+            )}
+          </div>
+
+          <div style={{
+            display: 'flex',
+            gap: 'clamp(0.5rem, 2vw, 1rem)',
+            flexWrap: 'wrap',
+            justifyContent: 'center',
+          }}>
+            <button
+              onClick={toggleTimer}
+              style={{
+                background: isRunning 
+                  ? 'rgba(251, 191, 36, 0.2)'
+                  : `linear-gradient(135deg, ${juryColors.accent} 0%, #d97706 100%)`,
+                border: isRunning ? '2px solid #fbbf24' : 'none',
+                borderRadius: '0.75rem',
+                padding: 'clamp(0.75rem, 2vh, 1rem) clamp(1.5rem, 4vw, 2.5rem)',
+                fontSize: 'clamp(0.9rem, 3vw, 1.1rem)',
+                fontWeight: '700',
+                color: '#ffffff',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              {isRunning ? '⏸ Pause' : '▶ Start'}
+            </button>
+            
+            <button
+              onClick={() => {
+                setIsRunning(false);
+                setTimeRemaining((juryMinutes * 60) + jurySeconds);
+                setFlashedTimes(new Set());
+                setIsExpired(false);
+                setIsOvertime(false);
+                setOvertimeSeconds(0);
+                setOvertimeFlashed(false);
+              }}
+              style={{
+                background: buttonBg,
+                border: `1px solid ${buttonBorder}`,
+                borderRadius: '0.75rem',
+                padding: 'clamp(0.75rem, 2vh, 1rem) clamp(1rem, 3vw, 1.5rem)',
+                fontSize: 'clamp(0.9rem, 3vw, 1rem)',
+                fontWeight: '600',
+                color: '#ffffff',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              ↺ Reset
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Completion Screen
+  if (isComplete) {
+    return (
+      <div style={{
+        height: '100vh',
+        maxHeight: '100vh',
+        overflow: 'hidden',
+        background: darkMode 
+          ? 'linear-gradient(145deg, #0a0a0f 0%, #1a1a2e 50%, #0f0f1a 100%)'
+          : 'linear-gradient(145deg, #f8fafc 0%, #e2e8f0 50%, #f1f5f9 100%)',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '1rem',
+        fontFamily: "'Instrument Sans', -apple-system, BlinkMacSystemFont, sans-serif",
+        position: 'relative',
+      }}>
+        <style>{`
+          @keyframes confettiFall {
+            0% { transform: translateY(-100vh) rotate(0deg); opacity: 1; }
+            100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+          }
+          
+          @keyframes scaleIn {
+            from { opacity: 0; transform: scale(0.8); }
+            to { opacity: 1; transform: scale(1); }
+          }
+        `}</style>
+        
+        {confettiData.map((conf) => (
+          <div
+            key={conf.id}
+            style={{
+              position: 'absolute',
+              top: '-10px',
+              left: `${conf.left}%`,
+              width: `${conf.width}px`,
+              height: `${conf.height}px`,
+              background: conf.color,
+              borderRadius: conf.isCircle ? '50%' : '0',
+              animation: `confettiFall ${conf.duration}s linear forwards`,
+              animationDelay: `${conf.delay}s`,
+              opacity: 0.8,
+            }}
+          />
+        ))}
+        
+        <div style={{
+          textAlign: 'center',
+          animation: 'scaleIn 0.5s ease-out',
+        }}>
+          <div style={{ fontSize: 'clamp(3rem, 12vw, 5rem)', marginBottom: 'clamp(0.5rem, 2vh, 1.5rem)' }}>🎉</div>
+          <h1 style={{
+            fontSize: 'clamp(1.5rem, 6vw, 3rem)',
+            fontWeight: '700',
+            color: themeColors.text,
+            marginBottom: '0.5rem',
+          }}>
+            Debat afgerond!
+          </h1>
+          <p style={{
+            fontSize: 'clamp(0.9rem, 3vw, 1.25rem)',
+            color: themeColors.textSecondary,
+            marginBottom: 'clamp(0.5rem, 2vh, 1rem)',
+          }}>
+            Lekker bezig! Het Debat is voorbij!
+          </p>
+          <div style={{
+            textAlign: 'center',
+            marginBottom: 'clamp(1.5rem, 5vh, 3rem)',
+          }}>
+            <p style={{
+              fontSize: 'clamp(0.8rem, 2.5vw, 1rem)',
+              color: themeColors.textSecondary,
+              fontStyle: 'italic',
+              marginBottom: completionQuote?.author ? '0.5rem' : '0',
+            }}>
+              "{completionQuote?.text}"
+            </p>
+            {completionQuote?.author && (
+              <p style={{
+                fontSize: 'clamp(0.7rem, 2vw, 0.85rem)',
+                color: themeColors.textSecondary,
+              }}>
+                - {completionQuote.author}
+              </p>
+            )}
+          </div>
+          
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1rem',
+            alignItems: 'center',
+          }}>
+            <button
+              onClick={() => {
+                setIsComplete(false);
+                setFormat(null);
+                setShowJuryberaadSetup(true);
+              }}
+              style={{
+                background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                border: 'none',
+                borderRadius: '1rem',
+                padding: 'clamp(0.75rem, 2vh, 1rem) clamp(1.5rem, 5vw, 3rem)',
+                fontSize: 'clamp(0.9rem, 3vw, 1.125rem)',
+                fontWeight: '600',
+                color: '#ffffff',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'scale(1.05)';
+                e.currentTarget.style.boxShadow = '0 10px 30px rgba(245, 158, 11, 0.4)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'scale(1)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              ⚖️ Start Juryberaad
+            </button>
+            
+            <button
+              onClick={goBack}
+              style={{
+                background: `linear-gradient(135deg, ${COLOR_THEMES[colorTheme].primary} 0%, ${COLOR_THEMES[colorTheme].secondary} 100%)`,
+                border: 'none',
+                borderRadius: '1rem',
+                padding: 'clamp(0.75rem, 2vh, 1rem) clamp(1.5rem, 5vw, 3rem)',
+                fontSize: 'clamp(0.9rem, 3vw, 1.125rem)',
+                fontWeight: '600',
+                color: '#ffffff',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'scale(1.05)';
+                e.currentTarget.style.boxShadow = `0 10px 30px ${COLOR_THEMES[colorTheme].primary}66`;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'scale(1)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              Terug naar startscherm
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const colors = getRoleColor(currentSpeaker?.role);
+  const speakers = FORMATS[format].speakers;
+
+  const timerBackground = () => {
+    if (isFlashing) return 'linear-gradient(145deg, #fef08a 0%, #fde047 50%, #facc15 100%)';
+    if (isOvertime) return 'linear-gradient(145deg, #450a0a 0%, #7f1d1d 50%, #450a0a 100%)';
+    if (isExpired) return 'linear-gradient(145deg, #7f1d1d 0%, #991b1b 50%, #7f1d1d 100%)';
+    if (backgroundType === 'image' && customBackground) return `url(${customBackground})`;
+    if (backgroundType === 'color' && customBackground) return customBackground;
+    return `linear-gradient(145deg, #0a0a0f 0%, ${colors.bg} 50%, #0a0a0f 100%)`;
+  };
+
+  return (
+    <div style={{
+      height: '100vh',
+      maxHeight: '100vh',
+      background: timerBackground(),
+      backgroundSize: backgroundType === 'image' ? 'cover' : 'auto',
+      backgroundPosition: 'center center',
+      backgroundRepeat: 'no-repeat',
+      display: 'flex',
+      flexDirection: 'column',
+      justifyContent: 'space-between',
+      padding: 'clamp(1rem, 3vh, 2rem) 1rem',
+      fontFamily: "'Instrument Sans', -apple-system, BlinkMacSystemFont, sans-serif",
+      transition: 'background 0.15s ease',
+      position: 'relative',
+      overflow: 'hidden',
+    }}>
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.02); }
+        }
+        
+        @keyframes glow {
+          0%, 100% { filter: brightness(1); }
+          50% { filter: brightness(1.2); }
+        }
+      `}</style>
+
+      <div style={{
+        display: 'flex',
+        justifyContent: 'flex-start',
+        alignItems: 'center',
+        flexShrink: 0,
+      }}>
+        <button
+          onClick={goBack}
+          style={{
+            background: buttonBg,
+            border: `1px solid ${buttonBorder}`,
+            borderRadius: '0.5rem',
+            padding: '0.5rem 1rem',
+            color: '#ffffff',
+            fontSize: '0.75rem',
+            fontWeight: '500',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            transition: 'all 0.2s ease',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = buttonBgHover;
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = buttonBg;
+          }}
+        >
+          ← Terug
+        </button>
+      </div>
+
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        gap: '0.25rem',
+        flexWrap: 'nowrap',
+        width: '100%',
+        padding: '0 1rem',
+        flexShrink: 0,
+      }}>
+        {speakers.map((speaker, idx) => (
+          <div
+            key={speaker.id}
+            style={{
+              flex: 1,
+              maxWidth: '3rem',
+              height: 'clamp(0.25rem, 1vh, 0.5rem)',
+              borderRadius: '0.25rem',
+              background: idx < currentSpeakerIndex 
+                ? getRoleColor(speaker.role).accent
+                : idx === currentSpeakerIndex
+                  ? colors.accent
+                  : (isImageBg ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.1)'),
+              transition: 'all 0.3s ease',
+              opacity: idx === currentSpeakerIndex ? 1 : 0.6,
+            }}
+          />
+        ))}
+      </div>
+
+      <div style={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'space-evenly',
+        minHeight: 0,
+      }}>
+        <div style={{
+          textAlign: 'center',
+        }}>
+          <h1 style={{
+            fontSize: 'clamp(1.5rem, 6vw, 2.5rem)',
+            fontWeight: '700',
+            color: '#ffffff',
+          }}>
+            {currentSpeaker.name}
+          </h1>
+        </div>
+
+        <div style={{
+          position: 'relative',
+        }}>
+          <div style={{
+            fontSize: 'clamp(4rem, 22vw, 10rem)',
+            fontFamily: "'JetBrains Mono', monospace",
+            fontWeight: '700',
+            color: isOvertime ? '#ef4444' : (isExpired ? '#fca5a5' : '#ffffff'),
+            letterSpacing: '-0.02em',
+            textShadow: isOvertime ? '0 0 60px rgba(239, 68, 68, 0.5)' : `0 0 60px ${colors.glow}`,
+            animation: (isRunning && timeRemaining <= 30) || isOvertime ? 'pulse 0.5s ease-in-out infinite' : 'none',
+            lineHeight: 1,
+          }}>
+            {isOvertime ? `+${overtimeSeconds}` : formatTime(timeRemaining)}
+          </div>
+          
+          {isOvertime && (
+            <div style={{
+              textAlign: 'center',
+              marginTop: '0.5rem',
+              fontSize: 'clamp(0.8rem, 2.5vw, 1rem)',
+              color: '#ef4444',
+              fontWeight: '600',
+              textTransform: 'uppercase',
+              letterSpacing: '0.1em',
+            }}>
+              Overtime
+            </div>
+          )}
+          
+          {!isOvertime && (
+            <div style={{
+              position: 'absolute',
+              bottom: '-1rem',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              width: '90%',
+              height: '6px',
+              background: isImageBg ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.1)',
+              borderRadius: '3px',
+              overflow: 'hidden',
+            }}>
+              <div style={{
+                height: '100%',
+                width: `${getProgress()}%`,
+                background: `linear-gradient(90deg, ${colors.accent}, ${colors.accent}cc)`,
+                borderRadius: '3px',
+                transition: 'width 0.3s ease',
+                boxShadow: `0 0 20px ${colors.glow}`,
+              }} />
+            </div>
+          )}
+        </div>
+
+        <div style={{
+          display: 'flex',
+          gap: 'clamp(1rem, 4vw, 2rem)',
+          flexWrap: 'wrap',
+          justifyContent: 'center',
+        }}>
+          <button
+            onClick={toggleTimer}
+            style={{
+              background: isRunning 
+                ? 'rgba(251, 191, 36, 0.2)'
+                : `linear-gradient(135deg, ${colors.accent} 0%, ${colors.accent}cc 100%)`,
+              border: isRunning ? '2px solid #fbbf24' : 'none',
+              borderRadius: '0.75rem',
+              padding: 'clamp(0.75rem, 2vh, 1rem) clamp(1.5rem, 4vw, 2.5rem)',
+              fontSize: 'clamp(0.9rem, 3vw, 1.1rem)',
+              fontWeight: '700',
+              color: '#ffffff',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'scale(1.05)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'scale(1)';
+            }}
+          >
+            {isRunning ? '⏸ Pause' : '▶ Start'}
+          </button>
+          
+          <button
+            onClick={resetTimer}
+            style={{
+              background: buttonBg,
+              border: `1px solid ${buttonBorder}`,
+              borderRadius: '0.75rem',
+              padding: 'clamp(0.75rem, 2vh, 1rem) clamp(1rem, 3vw, 1.5rem)',
+              fontSize: 'clamp(0.9rem, 3vw, 1rem)',
+              fontWeight: '600',
+              color: '#ffffff',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = buttonBgHover;
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = buttonBg;
+            }}
+          >
+            ↺ Reset
+          </button>
+        </div>
+      </div>
+
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingTop: 'clamp(0.75rem, 2vh, 1.5rem)',
+        borderTop: `1px solid ${buttonBorder}`,
+        flexShrink: 0,
+      }}>
+        <button
+          onClick={prevSpeaker}
+          disabled={currentSpeakerIndex === 0}
+          style={{
+            background: currentSpeakerIndex === 0 ? 'transparent' : buttonBg,
+            border: `1px solid ${buttonBorder}`,
+            borderRadius: '0.75rem',
+            padding: 'clamp(0.5rem, 1.5vh, 0.75rem) clamp(0.75rem, 2vw, 1rem)',
+            fontSize: 'clamp(0.75rem, 2.5vw, 0.9rem)',
+            fontWeight: '600',
+            color: currentSpeakerIndex === 0 ? '#374151' : '#ffffff',
+            cursor: currentSpeakerIndex === 0 ? 'not-allowed' : 'pointer',
+            transition: 'all 0.2s ease',
+          }}
+        >
+          ← Vorige
+        </button>
+        
+        <button
+          onClick={nextSpeaker}
+          style={{
+            background: `linear-gradient(135deg, ${colors.accent} 0%, ${colors.accent}cc 100%)`,
+            border: 'none',
+            borderRadius: '0.75rem',
+            padding: 'clamp(0.5rem, 1.5vh, 0.75rem) clamp(0.75rem, 2vw, 1rem)',
+            fontSize: 'clamp(0.75rem, 2.5vw, 0.9rem)',
+            fontWeight: '600',
+            color: '#ffffff',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'scale(1.05)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'scale(1)';
+          }}
+        >
+          {currentSpeakerIndex === speakers.length - 1 ? 'Finish' : 'Volgende →'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<DebateTimer />);
+  </script>
+</body>
+</html>
